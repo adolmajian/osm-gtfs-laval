@@ -373,6 +373,72 @@ class GTFSProcessor():
         final_stops_path = os.path.join(self.output_dir, 'final_stops.geojson')
         GTFSProcessor.write_data_to_geojson(final_stops, final_stops_path, "geom", ["props", "tags", "gtfs_props"])
 
+
+    def create_route_masters(self):
+        osm_id_route_master = -1000
+        osm_id_route = -10000
+
+        '''
+        route_master_template
+        
+        {
+            props: {
+                id: new or existing id
+            }
+            tags: {
+                name: Henri-Bourassa - Metro Montmorency
+                ref: route_short_name
+                network: STL
+                operator: STL
+                type: route_master
+                route_master: bus
+                public_transport:version: 2
+            }
+            members: []
+        }
+        
+        
+        route_template
+        {
+            props: {
+                id: new or existing id
+            }
+            tags: {
+                name: Direction Montmorency
+                ref: 2O
+                type: route
+                route: bus
+                network: STL
+                operator: STL
+                from: name of first stop
+                to: name of last stop
+                round_trip: yes or no
+                public_transport:version: 2
+            }
+            members: []
+        }
+        
+        '''
+
+
+        route_masters = defaultdict(list)
+        route_master_relations = []
+        route_relationss = []
+
+        filtered_gtfs_routes = [route for route in self.gtfs_data['routes']['data'] if route['route_id'].startswith(self.service_prefix)]
+
+        for filtered_route in filtered_gtfs_routes:
+            route_masters[filtered_route['route_short_name']].append(filtered_route)
+
+        for route_master in route_masters:
+            pass
+
+
+
+        print('')
+
+
+
     @staticmethod
     def write_data_to_geojson(data, out_path, geom_field, field_keys: list = None, epsg_id=None):
         # Create path
@@ -465,3 +531,4 @@ gtfs_processor.get_latest_service_id()
 gtfs_processor.convert_gtfs_stops_to_osm()
 gtfs_processor.get_existing_osm_data()
 gtfs_processor.conflate_stops()
+gtfs_processor.create_route_masters()

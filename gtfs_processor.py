@@ -77,7 +77,8 @@ all_tmpl = """
 area({})->.searchArea;
     (
     node["highway"="bus_stop"](area.searchArea);
-    relation["type"="route"]["route"="bus"](area.searchArea);
+    relation["type"="route"]["route"="bus"]["network"="STL"](area.searchArea);
+    relation["type"="route"]["route"="bus"]["network"="Société de transport de Laval"](area.searchArea);
     relation["type"="master_route"]["route_master"="bus"](area.searchArea);
     );
     out body;

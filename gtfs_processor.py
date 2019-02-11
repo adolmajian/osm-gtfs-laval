@@ -6,6 +6,7 @@ from tqdm import tqdm
 from collections import defaultdict
 from operator import itemgetter
 import time
+import argparse
 
 import overpy
 
@@ -90,7 +91,7 @@ class GTFSProcessor():
 	def __init__(self, gtfs_zipfile: str, boundaries_dir: str, output_dir: str):
 		self.gtfs_zipfile = gtfs_zipfile
 		self.output_dir = output_dir
-		self.gtfs_dir = os.path.join(os.getcwd(), 'gtfs')
+		self.gtfs_dir = os.path.join(os.path.dirname(self.gtfs_zipfile), 'gtfs')
 
 		# Create output directory
 		logger.info('Creating output directory')
@@ -176,9 +177,6 @@ class GTFSProcessor():
 		logger.info('Converting GTFS stops to OSM format')
 
 		for stop in tqdm(self.gtfs_data['stops']['data']):
-			# if not stop['stop_id'].startswith(self.service_prefix):
-			# 	continue
-
 			osm_id -= 1
 
 			point = ogr.Geometry(ogr.wkbPoint)
@@ -224,6 +222,7 @@ class GTFSProcessor():
 		# Get existing stops
 		logger.info('Getting existing stops...')
 		stops_result_laval = api.query(bus_stop_tmpl.format(region_ids['Laval']))
+		time.sleep(30)
 		stops_result_montreal = api.query(bus_stop_tmpl.format(region_ids['Montreal']))
 
 		for node in tqdm(stops_result_laval.nodes + stops_result_montreal.nodes):
@@ -341,6 +340,19 @@ class GTFSProcessor():
 			"route_masters": existing_route_masters
 		})
 
+		logger.info('Writing existing route ids to CSV')
+		existing_dir = os.path.join(self.output_dir, 'routes')
+		os.makedirs(existing_dir)
+		out_path = os.path.join(existing_dir, 'existing_routes.csv')
+
+		with open(out_path, 'w') as f:
+			writer = csv.writer(f)
+			writer.writerow(['route_ref', 'route_id'])
+
+			for existing_route in existing_routes:
+				writer.writerow([existing_route['props']['id'], existing_route['tags']['ref']])
+
+
 	def conflate_stops(self):
 		final_stops = []
 
@@ -387,9 +399,9 @@ class GTFSProcessor():
 					intersections.append(gtfs_stop)
 
 			if len(intersections) > 0:
-				codes = [intersection['tags']['ref'] for intersection in intersections]
+				codes = list(set([intersection['tags']['ref'] for intersection in intersections]))
 				codes_joined = ";".join(codes)
-				ids = [intersection['gtfs_props']['stop_id'] for intersection in intersections]
+				ids = list(set([intersection['gtfs_props']['stop_id'] for intersection in intersections]))
 
 				potential_stop = intersections[0].copy()
 				potential_stop['tags']['ref'] = codes_joined
@@ -412,7 +424,8 @@ class GTFSProcessor():
 						})
 
 					if osm_int_count > 1:
-						logger.warning('More than one OSM stop in proximity, taking first occurence.')
+						logger.warning('More than one OSM stop in proximity, taking first occurrence.')
+						print(osm_intersections)
 
 			if potential_stop is None:
 				logger.warning('No stop found during merging... This should not happen')
@@ -478,9 +491,13 @@ class GTFSProcessor():
 		route_master_relations = []
 		route_relations = []
 
+		# Create directory for shapes
+		shapes_dir = os.path.join(self.output_dir, 'shapes')
+		if os.path.exists(shapes_dir):
+			shutil.rmtree(shapes_dir)
+		os.makedirs(shapes_dir)
+
 		gtfs_routes = self.gtfs_data['routes']['data']
-		# existing_routes = self.existing_data['routes']
-		# existing_route_masters = self.existing_data['route_masters']
 
 		for gtfs_route in gtfs_routes:
 			route_masters[gtfs_route['route_short_name']].append(gtfs_route)
@@ -498,10 +515,20 @@ class GTFSProcessor():
 				route_name = route['route_long_name']
 
 				member_nodes = []
-				member_ways = []
+				# member_ways = []
 
-				logger.info('... Finding longest trip and stops for {}'.format(route_ref))
-				first_stop_name, last_stop_name, stop_ids = self.get_route_stops(route['route_id'])
+				# logger.info('... Finding longest trip and stops for {}'.format(route_ref))
+				first_stop_name, last_stop_name, stop_ids, trip_id = self.get_route_stops(route['route_id'])
+
+				# Build the shape to write to geojson
+				trip_shape = self.make_trip_shape(trip_id)
+				trip_shape.update({
+					"fields": {
+						"ref": route_ref
+					}
+				})
+				trip_filename = os.path.join(shapes_dir, '{}_route.geojson'.format(route_ref))
+				GTFSProcessor.write_data_to_geojson([trip_shape], trip_filename, 'geom', ['fields'])
 
 				for i, stop_id in enumerate(stop_ids):
 					member_node = {
@@ -514,7 +541,7 @@ class GTFSProcessor():
 					# if i == 0:
 					# 	member["props"]["role"] = 'platform_entry_only'
 					# if i == len(stop_ids) - 1:
-					# 	member['props']['role'] = 'platfrom_exit_only'
+					# 	member['props']['role'] = 'platform_exit_only'
 					member_nodes.append(member_node)
 
 				route_relation = {
@@ -548,9 +575,8 @@ class GTFSProcessor():
 				}
 				member_routes.append(member_route)
 
-
 			# Create route master relation
-			logger.info('Creating route master relation for {}'.format(key))
+			# logger.info('Creating route master relation for {}'.format(key))
 
 			# Only create route_master_relation if there are more than 1 directions
 			if round_trip == "yes":
@@ -612,16 +638,17 @@ class GTFSProcessor():
 					if 'ways' in existing_route['members']:
 						route_relation['members']['ways'] = existing_route['members']['ways']
 
-
 					for route_master_relation in self.route_master_relations:
 						if route_master_relation['tags']['ref'] == new_ref[:-1]:
 							for member in route_master_relation['members']:
 								if member['props']['ref'] == new_id:
 									member['props']['ref'] = existing_id
 
-
 	def write_to_xml(self):
 		logger.info('Writing JOSM XML files.')
+
+		# xml_dir = os.path.join(self.output_dir, 'xml')
+
 		output_file = os.path.join(self.output_dir, 'gtfs_laval.xml')
 
 		if os.path.exists(output_file):
@@ -650,7 +677,6 @@ class GTFSProcessor():
 			for k, v in stop['props'].items():
 				node.set(k, str(v))
 
-
 		for route_relation in self.route_relations:
 			relation = ET.SubElement(root, 'relation')
 			relation.set('version', '1')
@@ -664,7 +690,6 @@ class GTFSProcessor():
 				relation.set(k, str(v))
 
 			member_types = route_relation['members'].keys()
-			logger.info(member_types)
 
 			for member_node in route_relation['members']['nodes']:
 				mem = ET.SubElement(relation, 'member')
@@ -703,7 +728,6 @@ class GTFSProcessor():
 
 		tree = ET.ElementTree(root)
 		tree.write(output_file, encoding='unicode')
-
 
 	def get_route_stops(self, route_id):
 		trips = defaultdict(dict)
@@ -747,12 +771,39 @@ class GTFSProcessor():
 			for final_stop in self.final_stops:
 				if stop['stop_id'] in final_stop['gtfs_props']['stop_id']:
 					stop_ids.append(final_stop['props']['id'])
-				if i == 0:
-					first_stop_name = final_stop['tags']['name']
-				if i == len(stops) - 1:
-					last_stop_name = final_stop['tags']['name']
+					if i == 0:
+						first_stop_name = final_stop['tags']['name']
+					if i == len(stops) - 1:
+						last_stop_name = final_stop['tags']['name']
 
-		return first_stop_name, last_stop_name, stop_ids
+		return first_stop_name, last_stop_name, stop_ids, longest_trip_id
+
+	def make_trip_shape(self, trip_id):
+		trips = self.gtfs_data['trips']['data']
+		shapes = self.gtfs_data['shapes']['data']
+
+		shape_id = None
+		for trip in trips:
+			if trip['trip_id'] == trip_id:
+				shape_id = trip['shape_id']
+
+		shape_points = []
+		for shape in shapes:
+			if shape['shape_id'] == shape_id:
+				shape_point = {
+					"lon": float(shape['shape_pt_lon']),
+					"lat": float(shape['shape_pt_lat']),
+					"sequence": int(shape['shape_pt_sequence'])
+				}
+				shape_points.append(shape_point)
+
+		shape_points.sort(key=itemgetter('sequence'))
+
+		line = ogr.Geometry(ogr.wkbLineString)
+		for shape_point in shape_points:
+			line.AddPoint(shape_point['lon'], shape_point['lat'])
+
+		return {"geom": line}
 
 	@staticmethod
 	def write_data_to_geojson(data, out_path, geom_field, field_keys: list = None, epsg_id=None):

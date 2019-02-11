@@ -340,6 +340,30 @@ class GTFSProcessor():
 			"route_masters": existing_route_masters
 		})
 
+
+	def write_route_ids_csv(self):
+		existing_routes = self.existing_data['routes']
+
+		def complete(name):
+			vals = ['N', 'S', 'E', 'O']
+
+			b = False
+
+			for val in vals:
+				if val in name:
+					b = True
+					break
+			return b
+
+		rows = []
+		for existing_route in existing_routes:
+			osm_id = existing_route['props']['id']
+			ref = existing_route['tags']['ref']
+			name = int(ref[:-1]) if complete(ref) else -99999
+			rows.append([osm_id, name, ref])
+
+		rows.sort(key=lambda x: x[1])
+
 		logger.info('Writing existing route ids to CSV')
 		existing_dir = os.path.join(self.output_dir, 'routes')
 		os.makedirs(existing_dir)
@@ -347,10 +371,10 @@ class GTFSProcessor():
 
 		with open(out_path, 'w') as f:
 			writer = csv.writer(f)
-			writer.writerow(['route_ref', 'route_id'])
+			writer.writerow(['osm_id', 'route', 'ref'])
 
-			for existing_route in existing_routes:
-				writer.writerow([existing_route['props']['id'], existing_route['tags']['ref']])
+			for row in rows:
+				writer.writerow(row)
 
 
 	def conflate_stops(self):
@@ -899,6 +923,7 @@ gtfs_processor.get_latest_service_id()
 gtfs_processor.filter_gtfs_data()
 gtfs_processor.convert_gtfs_stops_to_osm()
 gtfs_processor.get_existing_osm_data()
+gtfs_processor.write_route_ids_csv()
 gtfs_processor.conflate_stops()
 gtfs_processor.create_relations()
 gtfs_processor.conflate_relations()

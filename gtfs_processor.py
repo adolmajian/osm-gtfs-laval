@@ -11,6 +11,7 @@ import argparse
 import overpy
 
 import xml.etree.ElementTree as ET
+import xml.dom.minidom as mn
 
 ogr.UseExceptions()
 osr.UseExceptions()
@@ -69,7 +70,7 @@ service_route_tmpl = """
 master_route_tmpl = """
     area({})->.searchArea;
     (
-    relation["type"="master_route"]["route_master"="bus"](area.searchArea);
+    relation["type"="route_master"]["route_master"="bus"](area.searchArea);
     );
     out body;
 """
@@ -340,7 +341,6 @@ class GTFSProcessor():
 			"route_masters": existing_route_masters
 		})
 
-
 	def write_route_ids_csv(self):
 		existing_routes = self.existing_data['routes']
 
@@ -375,7 +375,6 @@ class GTFSProcessor():
 
 			for row in rows:
 				writer.writerow(row)
-
 
 	def conflate_stops(self):
 		final_stops = []
@@ -503,7 +502,7 @@ class GTFSProcessor():
 				operator: STL
 				from: name of first stop
 				to: name of last stop
-				round_trip: yes or no
+				roundtrip: yes or no
 				public_transport:version: 2
 			}
 			members: []
@@ -581,7 +580,7 @@ class GTFSProcessor():
 						"operator": "STL",
 						"from": first_stop_name,
 						"to": last_stop_name,
-						"round_trip": round_trip,
+						"roundtrip": round_trip,
 						"public_transport:version": 2
 					},
 					"members": {
@@ -633,8 +632,6 @@ class GTFSProcessor():
 			self.route_master_relations = route_master_relations
 
 	def conflate_relations(self):
-		logger.info('Resolving route master relation conflicts')
-
 		logger.info('Resolving route relation conflicts')
 		for existing_route in self.existing_data['routes']:
 			existing_ref = existing_route['tags']['ref']
@@ -667,12 +664,12 @@ class GTFSProcessor():
 							for member in route_master_relation['members']:
 								if member['props']['ref'] == new_id:
 									member['props']['ref'] = existing_id
+									break
+					break
 
-	def write_to_xml(self):
-		logger.info('Writing JOSM XML files.')
-
-		# xml_dir = os.path.join(self.output_dir, 'xml')
-
+	def write_to_xml(self, types: list):
+		print(types)
+		logger.info('Writing JOSM XML files for {}.'.format(', '.join(types)))
 		output_file = os.path.join(self.output_dir, 'gtfs_laval.xml')
 
 		if os.path.exists(output_file):
@@ -689,66 +686,69 @@ class GTFSProcessor():
 		bounds.set('maxlat', str(max_lat))
 		bounds.set('maxlon', str(max_lon))
 
-		for stop in self.final_stops:
-			node = ET.SubElement(root, 'node')
-			node.set('version', '1')
+		if 'stops' in types:
+			for stop in self.final_stops:
+				node = ET.SubElement(root, 'node')
+				node.set('version', '1')
 
-			for k, v in stop['tags'].items():
-				tag = ET.SubElement(node, 'tag')
-				tag.set('k', str(k))
-				tag.set('v', str(v))
+				for k, v in stop['tags'].items():
+					tag = ET.SubElement(node, 'tag')
+					tag.set('k', str(k))
+					tag.set('v', str(v))
 
-			for k, v in stop['props'].items():
-				node.set(k, str(v))
+				for k, v in stop['props'].items():
+					node.set(k, str(v))
 
-		for route_relation in self.route_relations:
-			relation = ET.SubElement(root, 'relation')
-			relation.set('version', '1')
+		if 'routes' in types:
+			for route_relation in self.route_relations:
+				relation = ET.SubElement(root, 'relation')
+				relation.set('version', '1')
 
-			for k, v in route_relation['tags'].items():
-				tag = ET.SubElement(relation, 'tag')
-				tag.set('k', str(k))
-				tag.set('v', str(v))
+				for k, v in route_relation['tags'].items():
+					tag = ET.SubElement(relation, 'tag')
+					tag.set('k', str(k))
+					tag.set('v', str(v))
 
-			for k, v in route_relation['props'].items():
-				relation.set(k, str(v))
+				for k, v in route_relation['props'].items():
+					relation.set(k, str(v))
 
-			member_types = route_relation['members'].keys()
+				member_types = route_relation['members'].keys()
 
-			for member_node in route_relation['members']['nodes']:
-				mem = ET.SubElement(relation, 'member')
-
-				for k, v in member_node['props'].items():
-					mem.set(k, str(v))
-
-			if 'ways' in member_types:
-				for member_way in route_relation['members']['ways']:
+				for member_node in route_relation['members']['nodes']:
 					mem = ET.SubElement(relation, 'member')
 
-					for k, v in member_way['props'].items():
+					for k, v in member_node['props'].items():
 						mem.set(k, str(v))
 
-		for route_master_relation in self.route_master_relations:
-			relation = ET.SubElement(root, 'relation')
-			relation.set('version', '1')
-
-			for key, value in route_master_relation.items():
-				if key == 'tags':
-					for k, v in route_master_relation['tags'].items():
-						tag = ET.SubElement(relation, 'tag')
-						tag.set('k', str(k))
-						tag.set('v', str(v))
-				if key == 'props':
-					for k, v in route_master_relation['props'].items():
-						relation.set(k, str(v))
-				if key == 'members':
-					for member in route_master_relation['members']:
+				if 'ways' in member_types:
+					for member_way in route_relation['members']['ways']:
 						mem = ET.SubElement(relation, 'member')
 
-						for key, value in member.items():
-							if key == 'props':
-								for k, v in member['props'].items():
-									mem.set(k, str(v))
+						for k, v in member_way['props'].items():
+							mem.set(k, str(v))
+
+		if 'route_masters' in types:
+			for route_master_relation in self.route_master_relations:
+				relation = ET.SubElement(root, 'relation')
+				relation.set('version', '1')
+
+				for key, value in route_master_relation.items():
+					if key == 'tags':
+						for k, v in route_master_relation['tags'].items():
+							tag = ET.SubElement(relation, 'tag')
+							tag.set('k', str(k))
+							tag.set('v', str(v))
+					if key == 'props':
+						for k, v in route_master_relation['props'].items():
+							relation.set(k, str(v))
+					if key == 'members':
+						for member in route_master_relation['members']:
+							mem = ET.SubElement(relation, 'member')
+
+							for key, value in member.items():
+								if key == 'props':
+									for k, v in member['props'].items():
+										mem.set(k, str(v))
 
 		tree = ET.ElementTree(root)
 		tree.write(output_file, encoding='unicode')
@@ -911,7 +911,6 @@ class GTFSProcessor():
 		else:
 			return geom
 
-
 cwd = os.getcwd()
 gtfs_zipfile = os.path.join(cwd, 'gtfs.zip')
 boundaries_dir = os.path.join(cwd, 'boundaries')
@@ -927,7 +926,7 @@ gtfs_processor.write_route_ids_csv()
 gtfs_processor.conflate_stops()
 gtfs_processor.create_relations()
 gtfs_processor.conflate_relations()
-gtfs_processor.write_to_xml()
+gtfs_processor.write_to_xml(['route_masters'])
 
 time2 = time.time()
 duration = time2 - time1

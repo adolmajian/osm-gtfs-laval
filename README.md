@@ -7,8 +7,8 @@ A series of Python functions to visualize STL GTFS data and to convert to JOSM/O
 - You need to have GDAL installed on your system
 
 ## How to run
-1- Download the desired (latest) gtfs archive and pass it as an input. The script is not meant to be ran by a cli at this point.
-2 - Look at the functions and run the ones you need.
+1. Download the desired (latest) gtfs archive and pass it as an input. The script is not meant to be ran by a cli at this point.
+2. Look at the functions and run the ones you need.
 
 
 ## Notes
